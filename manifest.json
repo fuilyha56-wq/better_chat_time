@@ -1,0 +1,49 @@
+{
+    "name": "better_chat_time",
+    "version": "0.1.0",
+    "description": "更好的聊天时间 — 自动收集用户活跃时段，判断何时适合聊天",
+    "author": "Lycoris",
+    "license": "AGPL-3.0",
+    "dependencies": {
+        "plugins": [],
+        "components": []
+    },
+    "include": [
+        {
+            "component_type": "action",
+            "component_name": "should_chat_now",
+            "dependencies": []
+        },
+        {
+            "component_type": "action",
+            "component_name": "get_best_hours",
+            "dependencies": []
+        },
+        {
+            "component_type": "event_handler",
+            "component_name": "message_timestamp",
+            "dependencies": []
+        },
+        {
+            "component_type": "service",
+            "component_name": "better_chat_time",
+            "dependencies": []
+        },
+        {
+            "component_type": "config",
+            "component_name": "config",
+            "dependencies": []
+        }
+    ],
+    "entry_point": "plugin.py",
+    "min_core_version": "1.0.0",
+    "display_name": "更好的聊天时间",
+    "categories": [
+        "tool"
+    ],
+    "tags": [
+        "chat-time",
+        "activity",
+        "proactive"
+    ]
+}
