@@ -19,26 +19,30 @@ from typing import Any
 from src.app.plugin_system.api.log_api import get_logger
 from src.kernel.storage import JSONStore
 
+from .models import ActivityProfile
+
 logger = get_logger("bct_activity_store")
 
 _STORE_DIR = "data/better_chat_time/activity"
+# LRU 锁池上限，避免高并发场景下锁对象无限增长
+_MAX_LOCKS = 256
 
 
-def _empty_profile(stream_id: str) -> dict[str, Any]:
+def _empty_profile(stream_id: str) -> ActivityProfile:
     """创建空的 ActivityProfile。"""
-    return {
-        "stream_id": stream_id,
-        "updated_at": 0.0,
-        "first_seen_at": 0.0,
-        "hours": {str(h): 0 for h in range(24)},
-        "weekday_hours": {str(h): 0 for h in range(24)},
-        "weekend_hours": {str(h): 0 for h in range(24)},
-        "total": 0,
-        "last_message_at": 0.0,
-    }
+    return ActivityProfile(
+        stream_id=stream_id,
+        updated_at=0.0,
+        first_seen_at=0.0,
+        hours={str(h): 0 for h in range(24)},
+        weekday_hours={str(h): 0 for h in range(24)},
+        weekend_hours={str(h): 0 for h in range(24)},
+        total=0,
+        last_message_at=0.0,
+    )
 
 
-def _validate_profile(data: dict[str, Any], stream_id: str) -> dict[str, Any]:
+def _validate_profile(data: dict[str, Any], stream_id: str) -> ActivityProfile:
     """校验并修复 profile 数据，确保 24 槽完整。"""
     if not isinstance(data, dict):
         return _empty_profile(stream_id)
@@ -66,7 +70,6 @@ class ActivityStore:
     def __init__(self) -> None:
         self._store = JSONStore(_STORE_DIR)
         self._locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
-        self._MAX_LOCKS = 256
 
     def _get_lock(self, stream_id: str) -> asyncio.Lock:
         """获取 per-stream 锁，LRU 淘汰最久未使用的。"""
@@ -74,13 +77,13 @@ class ActivityStore:
             self._locks.move_to_end(stream_id)
             return self._locks[stream_id]
         # 淘汰最旧的
-        while len(self._locks) >= self._MAX_LOCKS:
+        while len(self._locks) >= _MAX_LOCKS:
             self._locks.popitem(last=False)
         lock = asyncio.Lock()
         self._locks[stream_id] = lock
         return lock
 
-    async def get_profile(self, stream_id: str) -> dict[str, Any] | None:
+    async def get_profile(self, stream_id: str) -> ActivityProfile | None:
         """获取指定 stream 的活跃时段 profile，无数据返回 None。"""
         data = await self._store.load(stream_id)
         if data is None:
@@ -114,7 +117,7 @@ class ActivityStore:
 
             await self._store.save(stream_id, profile)
 
-    async def save_profile(self, stream_id: str, profile: dict[str, Any]) -> None:
+    async def save_profile(self, stream_id: str, profile: ActivityProfile) -> None:
         """整体保存一个 profile（用于 DB 回填）。"""
         async with self._get_lock(stream_id):
             profile["updated_at"] = time.time()
@@ -123,3 +126,7 @@ class ActivityStore:
     async def list_all_stream_ids(self) -> list[str]:
         """列出所有已有 profile 的 stream_id。"""
         return await self._store.list_all()
+
+    def clear_locks(self) -> None:
+        """清理所有锁资源，供插件卸载时调用。"""
+        self._locks.clear()

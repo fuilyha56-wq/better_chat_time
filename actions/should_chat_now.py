@@ -11,26 +11,9 @@ import time
 from src.app.plugin_system.api.log_api import get_logger
 from src.app.plugin_system.base import BaseAction
 
+from ..utils import format_hour_range
+
 logger = get_logger("bct_should_chat_now")
-
-
-def _format_hour_range(hours: list[int]) -> str:
-    """将小时列表格式化为连续区间描述。"""
-    if not hours:
-        return ""
-    sorted_h = sorted(hours)
-    ranges: list[str] = []
-    start = sorted_h[0]
-    end = sorted_h[0]
-    for h in sorted_h[1:]:
-        if h == end + 1:
-            end = h
-        else:
-            ranges.append(f"{start}时" if start == end else f"{start}-{end}时")
-            start = h
-            end = h
-    ranges.append(f"{start}时" if start == end else f"{start}-{end}时")
-    return ", ".join(ranges)
 
 
 class ShouldChatNowAction(BaseAction):
@@ -49,8 +32,9 @@ class ShouldChatNowAction(BaseAction):
         """判断当前是否适合聊天。"""
         stream_id = self.chat_stream.stream_id
 
+        # 延迟导入避免循环依赖：action → service → plugin → action
         from ..services.profile_service import BetterChatTimeService
-        service = BetterChatTimeService(plugin=self.plugin)  # type: ignore[arg-type]
+        service = BetterChatTimeService(plugin=self.plugin)  # type: ignore[arg-type]  # BasePlugin → BetterChatTimePlugin，框架限制
 
         # 获取评分
         score = await service.is_good_time(stream_id)
@@ -90,6 +74,6 @@ class ShouldChatNowAction(BaseAction):
         if best and level != "适合":
             peak_hours = [item["hour"] for item in best if item["score"] > 1.0]
             if peak_hours:
-                lines.append(f"推荐时段: {_format_hour_range(peak_hours)}")
+                lines.append(f"推荐时段: {format_hour_range(peak_hours)}")
 
         return True, "\n".join(lines)

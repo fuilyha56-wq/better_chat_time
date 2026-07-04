@@ -37,8 +37,9 @@ class GetBestHoursAction(BaseAction):
         """查询最佳聊天时段。"""
         stream_id = self.chat_stream.stream_id
 
+        # 延迟导入避免循环依赖：action → service → plugin → action
         from ..services.profile_service import BetterChatTimeService
-        service = BetterChatTimeService(plugin=self.plugin)  # type: ignore[arg-type]
+        service = BetterChatTimeService(plugin=self.plugin)  # type: ignore[arg-type]  # BasePlugin → BetterChatTimePlugin，框架限制
 
         top_n = max(1, min(top_n, 10))
         best = await service.get_best_hours(stream_id, top_n=top_n)

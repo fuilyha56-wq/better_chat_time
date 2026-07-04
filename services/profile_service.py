@@ -13,6 +13,8 @@ from src.app.plugin_system.api.log_api import get_logger
 from src.core.components.base.service import BaseService
 from src.kernel.db import QueryBuilder
 
+from ..persistence.models import ActivityProfile
+
 logger = get_logger("better_chat_time_service")
 
 # 相邻小时平滑权重：[前一小时, 当前小时, 后一小时]
@@ -26,9 +28,23 @@ class BetterChatTimeService(BaseService):
     service_description = "更好的聊天时间 — 活跃度判断与最佳时段推荐"
     version = "0.1.0"
 
-    def _get_activity_store(self):
+    # ── 评分常量 ──
+    # 小时活跃度归一化分母：ratio / 此值 → score，2.0 意味着 2 倍平均活跃度 → 满分
+    HOUR_SCORE_DENOMINATOR: float = 2.0
+    # 无数据时的中性评分
+    NEUTRAL_SCORE: float = 0.5
+
+    # recency boost: 指数衰减，半衰期 20 分钟，最大加成 0.3
+    _RECENCY_HALF_LIFE_MIN: float = 20.0
+    _RECENCY_MAX_BOOST: float = 0.3
+
+    # silence penalty: 指数衰减，半衰期 3 天，最大惩罚 0.3
+    _SILENCE_HALF_LIFE_DAYS: float = 3.0
+    _SILENCE_MAX_PENALTY: float = 0.3
+
+    def _get_activity_store(self) -> ActivityStore:
         """获取 ActivityStore 实例。"""
-        return self.plugin._activity_store  # type: ignore[attr-defined]
+        return self.plugin.activity_store
 
     # ──────────────────────────────────────────────
     # 核心 API
@@ -46,7 +62,7 @@ class BetterChatTimeService(BaseService):
         profile = await store.get_profile(stream_id)
 
         if profile is None or profile["total"] == 0:
-            return 0.5  # 无数据时不做判断，返回中性
+            return self.NEUTRAL_SCORE
 
         now = time.time()
         lt = time.localtime(now)
@@ -143,6 +159,7 @@ class BetterChatTimeService(BaseService):
         Returns:
             成功回填的 stream 数量。
         """
+        # 延迟导入：避免插件加载时强依赖 DB models，仅在回填时按需导入
         from src.core.models.sql_alchemy import Messages
 
         if stream_ids is None:
@@ -193,16 +210,16 @@ class BetterChatTimeService(BaseService):
                     last_ts = float(ts)
 
             if total > 0:
-                profile = {
-                    "stream_id": sid,
-                    "updated_at": now,
-                    "first_seen_at": first_ts,
-                    "hours": {str(h): hourly[h] for h in range(24)},
-                    "weekday_hours": {str(h): weekday_hourly[h] for h in range(24)},
-                    "weekend_hours": {str(h): weekend_hourly[h] for h in range(24)},
-                    "total": total,
-                    "last_message_at": last_ts,
-                }
+                profile = ActivityProfile(
+                    stream_id=sid,
+                    updated_at=now,
+                    first_seen_at=first_ts,
+                    hours={str(h): hourly[h] for h in range(24)},
+                    weekday_hours={str(h): weekday_hourly[h] for h in range(24)},
+                    weekend_hours={str(h): weekend_hourly[h] for h in range(24)},
+                    total=total,
+                    last_message_at=last_ts,
+                )
                 await store.save_profile(sid, profile)
                 count += 1
 
@@ -212,10 +229,11 @@ class BetterChatTimeService(BaseService):
     async def _discover_streams(self) -> list[str]:
         """从 DB 发现所有 stream_id（群聊 + 私聊）。"""
         try:
+            # 延迟导入：同 bootstrap_from_db，避免强依赖 DB models
             from src.core.models.sql_alchemy import ChatStreams
             records = await QueryBuilder(ChatStreams).all(as_dict=True)
             return [r["stream_id"] for r in records if r.get("stream_id")]
-        except Exception as e:
+        except (ImportError, AttributeError) as e:
             logger.warning(f"发现 stream 列表失败: {e}")
             return []
 
@@ -224,13 +242,13 @@ class BetterChatTimeService(BaseService):
     # ──────────────────────────────────────────────
 
     def _calc_hour_score(
-        self, profile: dict[str, Any], current_hour: int, is_weekday: bool
+        self, profile: ActivityProfile, current_hour: int, is_weekday: bool
     ) -> float:
         """计算基于历史分布的小时活跃度评分（0~1），带相邻小时平滑。"""
         hours_data = self._get_relevant_hours(profile, is_weekday)
         total = sum(hours_data.values())
         if total == 0:
-            return 0.5
+            return self.NEUTRAL_SCORE
 
         # 相邻小时平滑
         prev_h = (current_hour - 1) % 24
@@ -244,46 +262,45 @@ class BetterChatTimeService(BaseService):
         # 归一化：相对于均匀分布的比值
         avg = total / 24.0
         if avg == 0:
-            return 0.5
+            return self.NEUTRAL_SCORE
 
         ratio = smoothed_count / avg
         # ratio 0 -> score 0, ratio 1 -> score 0.5, ratio 2+ -> score ~1.0
-        # 使用 sigmoid-like 映射
-        score = min(1.0, ratio / 2.0)
+        score = min(1.0, ratio / self.HOUR_SCORE_DENOMINATOR)
         return score
 
-    def _calc_recency_boost(self, profile: dict[str, Any], now: float) -> float:
-        """近期消息加成：用户刚发过消息说明在线。"""
+    def _calc_recency_boost(self, profile: ActivityProfile, now: float) -> float:
+        """近期消息加成：用户刚发过消息说明在线。
+
+        使用指数衰减：boost = MAX * 0.5^(elapsed / half_life)
+        半衰期 20 分钟：0 分钟 → 0.3，20 分钟 → 0.15，60 分钟 → ~0.037
+        """
         last_msg = profile.get("last_message_at", 0.0)
         if last_msg <= 0:
             return 0.0
 
         elapsed_minutes = (now - last_msg) / 60.0
-        if elapsed_minutes < 10:
-            return 0.3  # 10 分钟内刚说过话，强加成
-        if elapsed_minutes < 30:
-            return 0.15
-        if elapsed_minutes < 60:
-            return 0.05
-        return 0.0
+        if elapsed_minutes < 0:
+            return 0.0
+        return self._RECENCY_MAX_BOOST * (0.5 ** (elapsed_minutes / self._RECENCY_HALF_LIFE_MIN))
 
-    def _calc_silence_penalty(self, profile: dict[str, Any], now: float) -> float:
-        """连续静默降级：长时间无消息说明可能不在。"""
+    def _calc_silence_penalty(self, profile: ActivityProfile, now: float) -> float:
+        """连续静默降级：长时间无消息说明可能不在。
+
+        使用指数衰减：penalty = MAX * (1 - 0.5^(elapsed / half_life))
+        半衰期 3 天：1 天 → ~0.06，3 天 → 0.15，7 天 → ~0.25
+        """
         last_msg = profile.get("last_message_at", 0.0)
         if last_msg <= 0:
             return 0.0
 
         silence_days = (now - last_msg) / 86400.0
-        if silence_days < 1:
+        if silence_days < 1.0:
             return 0.0
-        if silence_days < 3:
-            return 0.1
-        if silence_days < 7:
-            return 0.2
-        return 0.3  # 超过一周无消息，大幅降低
+        return self._SILENCE_MAX_PENALTY * (1.0 - 0.5 ** (silence_days / self._SILENCE_HALF_LIFE_DAYS))
 
     def _get_relevant_hours(
-        self, profile: dict[str, Any], is_weekday: bool | None
+        self, profile: ActivityProfile, is_weekday: bool | None
     ) -> dict[str, int]:
         """获取相关的小时分布数据。"""
         if is_weekday is None:
@@ -295,10 +312,14 @@ class BetterChatTimeService(BaseService):
     def _get_config_value(self, key: str, default: Any) -> Any:
         """安全读取配置值。"""
         try:
+            # 延迟导入避免循环依赖：service → plugin → service
             from ..config import BetterChatTimeConfig
-            config = self.plugin.config  # type: ignore[attr-defined]
-            if isinstance(config, BetterChatTimeConfig):
-                return getattr(config.general, key, default)
-        except Exception:
+            from ..plugin import BetterChatTimePlugin
+            plugin = self.plugin
+            if isinstance(plugin, BetterChatTimePlugin) and isinstance(
+                plugin.config, BetterChatTimeConfig
+            ):
+                return getattr(plugin.config.general, key, default)
+        except (AttributeError, TypeError):
             pass
         return default

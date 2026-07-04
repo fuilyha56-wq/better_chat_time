@@ -28,7 +28,7 @@ class BetterChatTimePlugin(BasePlugin):
 
     def __init__(self, config: BetterChatTimeConfig | None = None) -> None:
         super().__init__(config)
-        self._activity_store = ActivityStore()
+        self.activity_store: ActivityStore = ActivityStore()
 
     def get_components(self) -> list[type]:
         """获取插件内所有组件类。"""
@@ -47,7 +47,8 @@ class BetterChatTimePlugin(BasePlugin):
                 if self.config
                 else 30
             )
-        except Exception:
+        except (AttributeError, TypeError) as e:
+            logger.debug(f"读取 bootstrap_days 配置失败，使用默认值 30: {e}")
             bootstrap_days = 30
 
         # 异步执行回填，不阻塞启动
@@ -65,3 +66,8 @@ class BetterChatTimePlugin(BasePlugin):
             logger.info(f"活跃时段 DB 回填完成: {count} 个 stream")
         except Exception as e:
             logger.warning(f"活跃时段 DB 回填失败: {e}")
+
+    async def on_plugin_unloaded(self) -> None:
+        """插件卸载时清理资源。"""
+        self.activity_store.clear_locks()
+        logger.info("better_chat_time 插件已卸载，锁资源已清理")

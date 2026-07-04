@@ -14,6 +14,8 @@ from src.app.plugin_system.base import BaseEventHandler
 from src.core.components.types import EventType
 from src.kernel.event import EventDecision
 
+from ..persistence.activity_store import ActivityStore
+
 logger = get_logger("bct_message_handler")
 
 
@@ -52,8 +54,7 @@ class MessageTimestampHandler(BaseEventHandler):
             hour = lt.tm_hour
             is_weekday = lt.tm_wday < 5
 
-            from ..persistence.activity_store import ActivityStore
-            store: ActivityStore = self.plugin._activity_store  # type: ignore[attr-defined]
+            store: ActivityStore = self.plugin.activity_store
             await store.update_profile(stream_id, hour, is_weekday, ts)
         except Exception as e:
             logger.debug(f"记录活跃时段失败: {e}")
