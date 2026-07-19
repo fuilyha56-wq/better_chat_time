@@ -17,8 +17,8 @@ logger = get_logger("bct_get_best_hours")
 class GetBestHoursAction(BaseAction):
     """查询对方最佳聊天时段。"""
 
-    action_name = "get_best_hours"
-    action_description = (
+    name = "get_best_hours"
+    description = (
         "查询对方最适合聊天的时段。基于系统自动收集的活跃数据，"
         "返回活跃度最高的几个小时。"
         "适合在预约下次主动聊天（schedule_proactive）时参考。"

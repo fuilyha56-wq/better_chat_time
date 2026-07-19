@@ -25,8 +25,8 @@ _SMOOTH_WEIGHTS = (0.2, 0.6, 0.2)
 class BetterChatTimeService(BaseService):
     """更好的聊天时间服务。"""
 
-    service_name = "better_chat_time"
-    service_description = "更好的聊天时间 — 活跃度判断与最佳时段推荐"
+    name = "better_chat_time"
+    description = "更好的聊天时间 — 活跃度判断与最佳时段推荐"
     version = "0.1.1"
 
     # ── 评分常量 ──

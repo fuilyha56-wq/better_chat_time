@@ -19,8 +19,8 @@ logger = get_logger("bct_should_chat_now")
 class ShouldChatNowAction(BaseAction):
     """判断当前是否适合和对方聊天。"""
 
-    action_name = "should_chat_now"
-    action_description = (
+    name = "should_chat_now"
+    description = (
         "判断当前是否适合和对方聊天。基于系统自动收集的活跃时段数据，"
         "返回「适合」「谨慎」「不适合」的结论。"
         "适合在想主动发起对话、预约下次聊天时间等场景下使用。"

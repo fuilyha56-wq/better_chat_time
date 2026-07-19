@@ -22,8 +22,8 @@ logger = get_logger("bct_message_handler")
 class MessageTimestampHandler(BaseEventHandler):
     """自动记录用户消息时间戳。"""
 
-    handler_name = "message_timestamp"
-    handler_description = "自动记录每条用户消息的时间戳到活跃时段"
+    name = "message_timestamp"
+    description = "自动记录每条用户消息的时间戳到活跃时段"
     weight = 0
     intercept_message = False
     init_subscribe = [EventType.ON_MESSAGE_RECEIVED]
