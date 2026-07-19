@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections import OrderedDict
 from typing import Any
@@ -85,10 +86,19 @@ class ActivityStore:
 
     async def get_profile(self, stream_id: str) -> ActivityProfile | None:
         """获取指定 stream 的活跃时段 profile，无数据返回 None。"""
-        data = await self._store.load(stream_id)
+        data = await self._load_profile_data(stream_id)
         if data is None:
             return None
         return _validate_profile(data, stream_id)
+
+    async def _load_profile_data(self, stream_id: str) -> dict[str, Any] | None:
+        """读取 profile，损坏数据按不存在处理以便后续自动重建。"""
+        try:
+            return await self._store.load(stream_id)
+        except json.JSONDecodeError as exc:
+            logger.warning(f"活跃时段数据损坏，将自动重建: {stream_id}: {exc}")
+            await self._store.delete(stream_id)
+            return None
 
     async def update_profile(
         self,
@@ -99,7 +109,7 @@ class ActivityStore:
     ) -> None:
         """增量更新一条消息的活跃时段记录。"""
         async with self._get_lock(stream_id):
-            data = await self._store.load(stream_id)
+            data = await self._load_profile_data(stream_id)
             profile = _validate_profile(data, stream_id) if data else _empty_profile(stream_id)
 
             h = str(max(0, min(23, hour)))

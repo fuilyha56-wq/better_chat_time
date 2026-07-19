@@ -13,6 +13,7 @@ from src.app.plugin_system.api.log_api import get_logger
 from src.core.components.base.service import BaseService
 from src.kernel.db import QueryBuilder
 
+from ..persistence.activity_store import ActivityStore
 from ..persistence.models import ActivityProfile
 
 logger = get_logger("better_chat_time_service")
@@ -26,7 +27,7 @@ class BetterChatTimeService(BaseService):
 
     service_name = "better_chat_time"
     service_description = "更好的聊天时间 — 活跃度判断与最佳时段推荐"
-    version = "0.1.0"
+    version = "0.1.1"
 
     # ── 评分常量 ──
     # 小时活跃度归一化分母：ratio / 此值 → score，2.0 意味着 2 倍平均活跃度 → 满分

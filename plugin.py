@@ -21,7 +21,7 @@ class BetterChatTimePlugin(BasePlugin):
     """更好的聊天时间插件。"""
 
     plugin_name = "better_chat_time"
-    plugin_version = "0.1.0"
+    plugin_version = "0.1.1"
     plugin_author = "Lycoris"
     plugin_description = "更好的聊天时间 — 自动收集活跃时段，判断何时适合聊天"
     configs = [BetterChatTimeConfig]

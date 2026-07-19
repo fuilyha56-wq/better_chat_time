@@ -1,6 +1,6 @@
 {
     "name": "better_chat_time",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "更好的聊天时间 — 自动收集用户活跃时段，判断何时适合聊天",
     "author": "Lycoris",
     "license": "AGPL-3.0",
